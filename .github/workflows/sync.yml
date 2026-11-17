@@ -1,0 +1,55 @@
+name: Sync plan
+
+# Mirrors the project plan (kept in the private ShipSoft/project_plan) to the
+# milestones and issues here and to the organisation project "Amaru". It runs
+# here because organisation secrets reach public repositories only.
+
+on:
+  schedule:
+    - cron: 0 3 * * *
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Show what would change without writing
+        type: boolean
+        default: false
+
+concurrency:
+  group: plan-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      # GITHUB_TOKEN cannot read the private plan, write other repositories or
+      # write organisation projects, so the sync runs as the ship-s-mate app.
+      # Without `repositories`, the token covers every repository the app is
+      # installed on.
+      - name: Create app token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-contents: read
+          permission-issues: write
+          permission-pull-requests: read
+          permission-organization-projects: write
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/project_plan
+          token: ${{ steps.app-token.outputs.token }}
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Sync
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          DRY_RUN: ${{ inputs.dry-run && '--dry-run' || '' }}
+        run: uv run tracking/sync.py $DRY_RUN
